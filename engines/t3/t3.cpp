@@ -31,6 +31,12 @@
 #include "engines/util.h"
 
 #include "t3/t3.h"
+
+#include <common/savefile.h>
+
+
+#include "texture.h"
+#include "ttmetafile.h"
 #include "t3/ttarchive.h"
 
 namespace T3 {
@@ -79,7 +85,7 @@ namespace T3 {
         const Common::FSNode gameDataDir(ConfMan.getPath("path"));
         Common::ArchiveMemberList files;
         //SearchMan.addDirectory(gameDataDir);
-        SearchMan.listMatchingMembers(files, "2*.ttarch");
+        SearchMan.listMatchingMembers(files, "4*.ttarch");
 
         if (files.empty()) {
             error("%s", "Cannot find game data - check configuration file");
@@ -89,7 +95,7 @@ namespace T3 {
         for (Common::ArchiveMemberList::const_iterator x = files.begin(); x != files.end(); ++x) {
             Common::String filename = (*x)->getName();
             filename.toLowercase();
-            warning("Checking file %s",filename.c_str());
+            warning("Checking file %s", filename.c_str());
             // Avoid duplicates
             if (SearchMan.hasArchive(filename))
                 continue;
@@ -100,7 +106,27 @@ namespace T3 {
                 delete t;
             }
         }
-
+        files.clear();
+        SearchMan.listMatchingMembers(files, "adv_flotsammarquisinterior_meshesa_000.d3dtx");
+        if (files.empty()) {
+            error("%s", "Cannot find game data - check configuration file");
+        } else {
+            for (Common::ArchiveMemberList::const_iterator x = files.begin(); x != files.end(); ++x) {
+                Common::String filename = (*x)->getName();
+                filename.toLowercase();
+                warning("Checking file %s", filename.c_str());
+                // Avoid duplicates
+                if (SearchMan.hasArchive(filename))
+                    continue;
+                auto *t = new Common::File();
+                if (t->open((*x)->getPathInArchive())) {
+                    TTMetaFile *packFile = new TTMetaFile(t,TTMetaFile::HASHED);
+                    Texture tex(packFile, getGameType());
+                } else {
+                    delete t;
+                }
+            }
+        }
         _gfx = createRenderer(_system);
         _gfx->init();
 

@@ -6,8 +6,11 @@ MODULE_OBJS := \
 	gfx_opengl.o \
 	gfx_opengl_shaders.o \
 	ttarchive.o \
+	ttmetafile.o \
 	t3.o \
-	utils\blowfish_ttarch.c
+	t3seakablereadstream.o \
+	texture.o \
+	utils\blowfish_ttarch.o
 
 ifdef USE_TINYGL
 MODULE_OBJS += \

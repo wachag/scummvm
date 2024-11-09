@@ -18,7 +18,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
-
+#define FORBIDDEN_SYMBOL_EXCEPTION_exit
 #include "common/file.h"
 #include "common/substream.h"
 #include "common/memstream.h"
@@ -28,16 +28,18 @@
 #include "ttarchive.h"
 
 #include <exception>
-#include <common/std/vector.h>
-#include <twp/util.h>
+#include <common/compression/deflate.h>
+#include <common/std/algorithm.h>
 
 #include "t3.h"
+#include "t3seekablereadstream.h"
 
 namespace T3 {
     TTArchiveEntry::TTArchiveEntry(const Common::Path &name, uint32 offset, uint32 len, TTArchive *parent) {
         _name = name;
         _offset = offset;
         _len = len;
+
         _parent = parent;
         _name.toLowercase();
     }
@@ -46,17 +48,109 @@ namespace T3 {
         return _parent->createReadStreamForMember(_name);
     }
 
-    Common::String TTArchive::readString(Common::SeekableReadStream *_r) {
-        uint32_t length = _r->readUint32LE();
-        Common::String r;
-        warning("Length is %u", length);
 
+    TTArchive::TTArchiveEntryStream::TTArchiveEntryStream(TTArchiveEntry *entry) {
+        _currentChunk.resize(entry->_parent->_header.chunkSize);
+        _pos = 0;
+        _offset = entry->_offset;
+        _len = entry->_len;
+        warning("len is %u",_len);
+        _error = false;
+        _parent = entry->_parent;
+        _loadedChunkIndex = 0;
+        loadCurrentChunk(true);
+    }
 
-        for (uint32_t i = 0; i < length; i++) {
-            uint8_t b=_r->readByte();
-            if(b!=0)r += b;
+    bool TTArchive::TTArchiveEntryStream::loadCurrentChunk(bool force) {
+        int64 chunkIndex = (_offset + _pos) / _parent->_header.chunkSize;
+        if (chunkIndex >= _parent->_header.totalIndex) {
+            _error = true;
+            return false;
         }
-        return r;
+        if (!force && (chunkIndex == _loadedChunkIndex)) { return true; }
+        warning("loadCurrentChunk: chunkIndex = %ld _loadedChunkIndex = %ld", chunkIndex, _loadedChunkIndex);
+        uint64 fileOffset = _parent->_baseOffset;
+        for (uint32 i = 0; i < chunkIndex; i++) {
+            fileOffset += _parent->_header.chunks[i];
+        }
+        warning("loadCurrentChunk: fileOffset = %llu", fileOffset);
+        _parent->_stream->seek(fileOffset, SEEK_SET);
+        Common::Array<uint8> buffer;
+        buffer.resize(_parent->_header.chunks[chunkIndex]);
+        _parent->_stream->read(buffer.data(), buffer.size());
+        _loadedChunkIndex = chunkIndex;
+        // TODO: blowfish
+        if(Common::inflateZlibHeaderless(_currentChunk.data(), _currentChunk.size(), buffer.data(), buffer.size())) {
+            return true;
+        } else {
+            _error = true;
+            return false;
+        }
+    }
+
+    bool TTArchive::TTArchiveEntryStream::err() const {
+    //    warning("TTArchive::TTArchiveEntryStream::err: %s",_error?"true":"false");
+        return _error;
+    }
+
+    void TTArchive::TTArchiveEntryStream::clearErr() {
+        _error = false;
+    }
+
+    bool TTArchive::TTArchiveEntryStream::eos() const {
+      //  warning("TTArchive::TTArchiveEntryStream::eos: %s",(_pos>=_len)?"true":"false");
+        return _pos >= _len;
+    }
+
+    uint32 TTArchive::TTArchiveEntryStream::read(void *dataPtr, uint32 dataSize) {
+        int64 remaining = dataSize;
+        uint8 *pData = static_cast<uint8 *>(dataPtr);
+        if (eos() || dataSize==0 || (dataSize > (_len - _pos))) {
+            _error = (dataSize>0);
+            warning("TTArchive::TTArchiveEntryStream::read: dataSize = %llu", dataSize);
+            return 0;
+        }
+        while (remaining != 0) {
+            int64 offsetInChunk = _pos % _parent->_header.chunkSize;
+            int64 remainingInChunk = _parent->_header.chunkSize - offsetInChunk;
+            int64 transferSize = (remainingInChunk > remaining) ? remaining : remainingInChunk;
+            //warning("ofsin %llu remin %llu transf %llu rema %llu pos %llu len %llu", offsetInChunk, remainingInChunk,
+            //        transferSize, remaining, _pos, _len);
+      //      warning("Pos is %u Len is %u",(unsigned)_pos,(unsigned)_len);
+            memcpy(pData, _currentChunk.data()+offsetInChunk, transferSize);
+            _pos += transferSize;
+            remaining -= transferSize;
+            pData += transferSize;
+            if(!this->loadCurrentChunk(false)) {
+                _error=true;
+                return 0;
+            }
+        }
+        return dataSize;
+    }
+
+    int64 TTArchive::TTArchiveEntryStream::pos() const {
+        return _pos;
+    }
+
+    int64 TTArchive::TTArchiveEntryStream::size() const {
+        return _len;
+    }
+
+    bool TTArchive::TTArchiveEntryStream::seek(int64 offset, int whence) {
+        if(whence == SEEK_SET) {
+            _pos = offset;
+        } else if(whence == SEEK_CUR) {
+            _pos += offset;
+        } else if(whence == SEEK_END) {
+            warning("seek SEEK_END not yet implemented");
+            _error = true;
+            return false;
+        }
+        return loadCurrentChunk(false);
+    }
+
+    TTArchive::TTArchiveEntryStream::~TTArchiveEntryStream() {
     }
 
     bool TTArchive::open(const Common::Path &filename, bool keepStream) {
@@ -66,140 +160,118 @@ namespace T3 {
 
         Common::File *file = new Common::File();
         if (!file->open(filename)) {
+            _stream = nullptr;
             result = false;
         } else {
+            _stream = file;
             switch (g_t3->getGameType()) {
                 case T3Type_TOMI1:
                     result = parseFileTable(file);
                     break;
             }
         }
-        file->close();
-        delete file;
         return result;
     }
 
-    struct TTArchiveHeader {
-        uint32_t version;
-
-        enum InfoMode {
-            INFOMODE_NORMAL,
-            INFOMODE_ENCRYPTED
-        } infoMode;
-
-        enum FilesMode {
-            FILESMODE_NORMAL,
-            FILESMODE_UNKNOWN,
-            FILESMODE_ZIPPED
-        } filesMode;
-
-        uint32_t type3;
-        uint32_t totalIndex;
-        Common::Array<uint32_t> chunks;
-        uint32_t reserved0;
-        size_t chunkSize;
-        uint32_t reserved1;
-        uint32_t reserved2;
-        uint32_t reserved3;
-        uint32_t reserved4;
-        uint8_t reserved5;
-        uint32_t reserved6;
-        uint32_t infoSize;
-        uint32_t infoZippedSize;
-        Common::Array<uint8_t> fileInformation;
-    };
 
     bool TTArchive::parseFileTable(Common::File *file) {
-        TTArchiveHeader header;
-
-        header.version = file->readUint32LE();
-        if ((header.version < 1) || (header.version > 9)) {
-            error("Invalid version %u\n", header.version);
+        _header.version = file->readUint32LE();
+        if ((_header.version < 1) || (_header.version > 9)) {
+            error("Invalid version %u\n", _header.version);
             return false;
         }
 
-        header.infoMode = static_cast<TTArchiveHeader::InfoMode>(file->readUint32LE());
-        if (header.infoMode > 1) {
-            error("Invalid info mode %u\n", header.infoMode);
+        _header.infoMode = static_cast<TTArchiveHeader::InfoMode>(file->readUint32LE());
+        if (_header.infoMode > 1) {
+            error("Invalid info mode %u\n", _header.infoMode);
             return false;
         }
 
-        header.type3 = file->readUint32LE();
-        header.filesMode = TTArchiveHeader::FILESMODE_NORMAL;
-        if (header.version > 2) {
-            header.filesMode = static_cast<TTArchiveHeader::FilesMode>(file->readUint32LE());
+        _header.type3 = file->readUint32LE();
+        _header.filesMode = TTArchiveHeader::FILESMODE_NORMAL;
+        if (_header.version > 2) {
+            _header.filesMode = static_cast<TTArchiveHeader::FilesMode>(file->readUint32LE());
         }
-        if (header.filesMode > 2) {
-            error("Invalid files mode %u\n", header.filesMode);
+        if (_header.filesMode > 2) {
+            error("Invalid files mode %u\n", _header.filesMode);
             return false;
         }
-        header.totalIndex = 0;
-        if (header.version > 2) {
-            header.totalIndex = file->readUint32LE();
-            warning("Total number of files %u\n", header.totalIndex);
-            if (header.totalIndex) {
-                header.chunks.resize(header.totalIndex);
+        _header.totalIndex = 0;
+        _header.chunkSize = 0;
+        if (_header.version > 2) {
+            _header.totalIndex = file->readUint32LE();
+            warning("Total number of files %u\n", _header.totalIndex);
+            if (_header.totalIndex) {
+                _header.chunks.resize(_header.totalIndex);
 
-                for (uint32_t i = 0; i < header.totalIndex; i++) {
-                    header.chunks[i] = file->readUint32LE();
+                for (uint32_t i = 0; i < _header.totalIndex; i++) {
+                    _header.chunks[i] = file->readUint32LE();
                 }
             }
-            header.reserved0 = file->readUint32LE();
-            if (header.version > 3) {
-                header.reserved1 = file->readUint32LE();
-                header.reserved2 = file->readUint32LE();
-                if (header.version > 6) {
-                    header.reserved3 = file->readUint32LE();
-                    header.reserved4 = file->readUint32LE();
-                    header.chunkSize = file->readUint32LE() * 1024;
-                    warning("Chunk size %u\n", header.chunkSize);
-                    if (header.version > 7) {
-                        header.reserved5 = file->readByte();
+            _header.reserved0 = file->readUint32LE();
+            if (_header.version > 3) {
+                _header.reserved1 = file->readUint32LE();
+                _header.reserved2 = file->readUint32LE();
+                if (_header.version > 6) {
+                    _header.reserved3 = file->readUint32LE();
+                    _header.reserved4 = file->readUint32LE();
+                    _header.chunkSize = file->readUint32LE() * static_cast<size_t>(1024);
+                    if (_header.version > 7) {
+                        _header.reserved5 = file->readByte();
                     }
-                    if (header.version > 8) { header.reserved6 = file->readUint32LE(); }
+                    if (_header.version > 8) { _header.reserved6 = file->readUint32LE(); }
                 }
             }
         }
-        header.infoSize = file->readUint32LE();
-        header.infoZippedSize = 0;
-        if ((header.filesMode >= TTArchiveHeader::FILESMODE_ZIPPED) && (header.version > 6)) {
-            header.infoZippedSize = file->readUint32LE();
+        _header.infoSize = file->readUint32LE();
+        _header.infoZippedSize = 0;
+        if ((_header.filesMode >= TTArchiveHeader::FILESMODE_ZIPPED) && (_header.version > 6)) {
+            _header.infoZippedSize = file->readUint32LE();
         }
 
-        header.fileInformation.resize(header.infoSize);
-        if ((header.version > 6) && (header.filesMode >= TTArchiveHeader::FILESMODE_ZIPPED)) {
-            error("TODO: unzip");
-            return false;
+        _header.fileInformation.resize(_header.infoSize);
+        if ((_header.version > 6) && (_header.filesMode >= TTArchiveHeader::FILESMODE_ZIPPED)) {
+            _header.fileInformation.resize(_header.infoSize);
+            Common::Array<uint8_t> zippedFileInformation(_header.infoZippedSize);
+            for (uint32_t i = 0; i < _header.infoZippedSize; i++) {
+                zippedFileInformation[i] = file->readByte();
+            }
+            if (!Common::inflateZlibHeaderless(_header.fileInformation.data(), _header.infoSize,
+                                               zippedFileInformation.data(), _header.infoZippedSize)) {
+                error("Inflate error");
+            }
         } else {
-            for (uint32_t i = 0; i < header.infoSize; i++) {
-                header.fileInformation[i] = file->readByte();
+            for (uint32_t i = 0; i < _header.infoSize; i++) {
+                _header.fileInformation[i] = file->readByte();
             }
         }
-        if (header.infoMode >= header.INFOMODE_ENCRYPTED) {
+        if (_header.infoMode >= _header.INFOMODE_ENCRYPTED) {
             error("TODO: decrypt");
             return false;
         }
-        size_t baseOffset = file->pos();
+        _baseOffset = file->pos();
         size_t chunksB = 0;
-        if (header.filesMode >= TTArchiveHeader::FILESMODE_ZIPPED) {
-            if (header.infoMode >= TTArchiveHeader::INFOMODE_ENCRYPTED) {
+        if (_header.filesMode >= TTArchiveHeader::FILESMODE_ZIPPED) {
+            if (_header.infoMode >= TTArchiveHeader::INFOMODE_ENCRYPTED) {
                 chunksB = 1;
             }
         }
-        warning("FS compression: %s", header.totalIndex ? "on" : "off");
+        warning("FS compression: %s", _header.totalIndex ? "on" : "off");
         warning("FS encryption: %s", chunksB ? "on" : "off");
 
-        Common::MemoryReadStream infoReader(header.fileInformation.data(), header.infoSize);
+        Common::MemoryReadStream *infoReaderMem = new Common::MemoryReadStream(
+            _header.fileInformation.data(), _header.infoSize);
+        T3SeekableReadStream infoReader(infoReaderMem);
         uint32_t folders = infoReader.readUint32LE();
         warning("FS folders: %u", folders);
         for (uint32_t i = 0; i < folders; i++) {
-            Common::String name = readString(&infoReader);
+            Common::String name = infoReader.readTTString();
             warning("FS name: %s", name.c_str());
         }
         uint32_t files = infoReader.readUint32LE();
         warning("FS files: %u", files);
         for (uint32_t i = 0; i < files; i++) {
-            Common::String name = readString(&infoReader);
+            Common::String name = infoReader.readTTString();
 
             warning("FS file name: %s", name.c_str());
             uint32_t zero = infoReader.readUint32LE();
@@ -255,14 +327,26 @@ namespace T3 {
         TTArchiveEntryPtr i = _entries[path];
 
         if (!_stream) {
+            warning("No stream path");
             Common::File *file = new Common::File();
             file->open(_archiveFileName);
             return new Common::SeekableSubReadStream(file, i->_offset, i->_offset + i->_len, DisposeAfterUse::YES);
         } else {
-            byte *data = static_cast<byte*>(malloc(sizeof(byte) * i->_len));
-            _stream->seek(i->_offset, SEEK_SET);
-            _stream->read(data, i->_len);
-            return new Common::MemoryReadStream(data, i->_len, DisposeAfterUse::YES);
+            warning("Stream already  exists: %u %u", i->_offset, i->_len);
+            if (_header.totalIndex == 0) {
+                byte *data = static_cast<byte *>(malloc(sizeof(byte) * i->_len));
+
+                _stream->seek(i->_offset, SEEK_SET);
+
+                _stream->read(data, i->_len);
+                if (_stream->eos() || _stream->err()) {
+                    error("Error reading file");
+                }
+                return new Common::MemoryReadStream(data, i->_len, DisposeAfterUse::YES);
+            } else {
+                warning("Compressed");
+                return new TTArchiveEntryStream(i.get());
+            }
         }
     }
 } // T3
