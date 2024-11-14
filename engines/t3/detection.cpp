@@ -24,44 +24,60 @@
 #include "base/plugins.h"
 #include "t3/t3.h"
 
-static const PlainGameDescriptor t3_setting[] = {
-	{ "t3", "T3: Telltale Tool engine" },
-	{ nullptr, nullptr }
+static const PlainGameDescriptor tinselGames[] = {
+    {"dw", "Discworld"},
+    {"dw2", "Discworld II: Missing Presumed ...!?"},
+    {"noir", "Discworld Noir"},
+    {0, 0}
+};
+
+
+static const PlainGameDescriptor t3Games[] = {
+    {"tomi101", "Tales of Monkey Island 101: Launch of the Screaming Narwhal"},
+    {nullptr, nullptr}
 };
 
 static const ADGameDescription t3Descriptions[] = {
-	{
-		"t3",
-		"Tales of Monkey Island - Launch of the Screaming Narwhal (GOG edition)",
-		AD_ENTRY1s("1_MonkeyIsland101_pc_data.ttarch", "85c1600abcac3baca56ff4fb6bf8d040",125174824),
-		Common::EN_ANY,
-		Common::kPlatformWindows,
-		ADGF_NO_FLAGS,
-		GUIO2(GUIO_NOLAUNCHLOAD, GUIO_NOMIDI								)
-	},
+    {
+        "tomi101",
+        "Tales of Monkey Island - Launch of the Screaming Narwhal (GOG edition)",
+        AD_ENTRY1s("MonkeyIsland101.exe", "65b5607833aef73f4f58aae30f12ecdc", 6003200),
+        Common::EN_ANY,
+        Common::kPlatformWindows,
+        ADGF_NO_FLAGS,
+        GUIO2(GUIO_NOLAUNCHLOAD, GUIO_NOMIDI)
+    },
+    {
+        "tomi101",
+        "Tales of Monkey Island - Launch of the Screaming Narwhal (Steam edition)",
+        AD_ENTRY1s("MonkeyIsland101.exe", "395e3f07697ad4ddd13367e8ce0cdcaf", 7897088),
+        Common::EN_ANY,
+        Common::kPlatformWindows,
+        ADGF_NO_FLAGS,
+        GUIO2(GUIO_NOLAUNCHLOAD, GUIO_NOMIDI)
+    },
 
 
-
-	AD_TABLE_END_MARKER
+    AD_TABLE_END_MARKER
 };
 
 class T3MetaEngineDetection : public AdvancedMetaEngineDetection<ADGameDescription> {
 public:
-	T3MetaEngineDetection() : AdvancedMetaEngineDetection(t3Descriptions, t3_setting) {
-		_md5Bytes = 512;
-	}
+    T3MetaEngineDetection() : AdvancedMetaEngineDetection(t3Descriptions, t3Games) {
+        _md5Bytes = 512;
+    }
 
-	const char *getName() const override {
-		return "t3";
-	}
+    const char *getName() const override {
+        return "t3";
+    }
 
-	const char *getEngineName() const override {
-		return "T3: Telltale Tool engine";
-	}
+    const char *getEngineName() const override {
+        return "T3: Telltale Tool engine";
+    }
 
-	const char *getOriginalCopyright() const override {
-		return "Copyright (C) Telltale Games";
-	}
+    const char *getOriginalCopyright() const override {
+        return "Copyright (C) Telltale Games";
+    }
 };
 
 REGISTER_PLUGIN_STATIC(T3_DETECTION, PLUGIN_TYPE_ENGINE_DETECTION, T3MetaEngineDetection);

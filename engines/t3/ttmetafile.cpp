@@ -14,6 +14,7 @@ namespace T3 {
                            TTMetaFile::ClassNameType classNameType): _orgStream(new T3SeekableReadStream(data)),
                                                                      _offset(0) {
         uint32 magic;
+
         _orgStream->seek(_offset, SEEK_SET);
         magic = _orgStream->readUint32LE();
         warning("Magic: 0x%08x MKTAG: 0x%08x", magic, MKTAG('M','T','R','E'));

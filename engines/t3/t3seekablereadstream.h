@@ -31,6 +31,8 @@ namespace T3 {
         bool seek(int64 offset, int whence = SEEK_SET) ;
 
         Common::String readTTString();
+
+        bool readTTBoolean();
     };
 } // T3
 

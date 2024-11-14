@@ -81,16 +81,40 @@ namespace T3 {
         delete _gfx;
     }
 
+    Common::Error T3Engine::findKey(Common::SeekableReadStream *executable) {
+        // 70 30 65 67 6C 65 63 52
+        /* find 0x70 0x30 0x65 0x67 0x6c 0x65 0x63 0x52 in executable */
+        uint32 key = 0;
+        while (!executable->eos()) {
+            key = executable->readUint32LE();
+            if (key == MKTAG(0x67, 0x65, 0x30, 0x70)) {
+                key = executable->readUint32LE();
+                if (key == MKTAG(0x52, 0x63, 0x65, 0x6c)) {
+                    warning("Found key at pos: %llu", (unsigned long long)executable->pos());
+                    return Common::kNoError;
+                }
+            }
+        }
+
+        return Common::kUnsupportedGameidError;
+    }
+
     Common::Error T3Engine::run() {
         const Common::FSNode gameDataDir(ConfMan.getPath("path"));
         Common::ArchiveMemberList files;
-        //SearchMan.addDirectory(gameDataDir);
+        SearchMan.addSubDirectoryMatching(gameDataDir, "Pack");
         SearchMan.listMatchingMembers(files, "4*.ttarch");
+
+        Common::File exe;
+
+        exe.open("MonkeyIsland101.exe");
+        findKey(&exe);
+        exe.close();
 
         if (files.empty()) {
             error("%s", "Cannot find game data - check configuration file");
         }
-        // Load labs
+        // Load ttarchs
         int priority = -1;
         for (Common::ArchiveMemberList::const_iterator x = files.begin(); x != files.end(); ++x) {
             Common::String filename = (*x)->getName();
@@ -120,7 +144,7 @@ namespace T3 {
                     continue;
                 auto *t = new Common::File();
                 if (t->open((*x)->getPathInArchive())) {
-                    TTMetaFile *packFile = new TTMetaFile(t,TTMetaFile::HASHED);
+                    TTMetaFile *packFile = new TTMetaFile(t, TTMetaFile::HASHED);
                     Texture tex(packFile, getGameType());
                 } else {
                     delete t;

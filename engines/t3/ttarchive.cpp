@@ -80,6 +80,8 @@ namespace T3 {
         _parent->_stream->read(buffer.data(), buffer.size());
         _loadedChunkIndex = chunkIndex;
         // TODO: blowfish
+
+
         if(Common::inflateZlibHeaderless(_currentChunk.data(), _currentChunk.size(), buffer.data(), buffer.size())) {
             return true;
         } else {
@@ -238,7 +240,7 @@ namespace T3 {
             }
             if (!Common::inflateZlibHeaderless(_header.fileInformation.data(), _header.infoSize,
                                                zippedFileInformation.data(), _header.infoZippedSize)) {
-                error("Inflate error");
+                warning("Inflate error");
             }
         } else {
             for (uint32_t i = 0; i < _header.infoSize; i++) {

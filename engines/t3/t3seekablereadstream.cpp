@@ -41,6 +41,11 @@ namespace T3 {
         _wrapped->clearErr();
     }
 
+	bool T3SeekableReadStream::readTTBoolean() {
+		char c= _wrapped->readSByte();
+		return c == '1';
+	}
+
     Common::String T3SeekableReadStream::readTTString() {
         uint32 length;
         Common::String ret;

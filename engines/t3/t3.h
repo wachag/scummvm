@@ -73,6 +73,7 @@ private:
 	void dimRegionInOut();
 	void drawInViewport();
 	void drawRgbaTexture();
+	Common::Error findKey(Common::SeekableReadStream * exec);
 };
 	extern T3Engine *g_t3;
 
