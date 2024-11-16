@@ -91,6 +91,11 @@ namespace T3 {
                 key = executable->readUint32LE();
                 if (key == MKTAG(0x52, 0x63, 0x65, 0x6c)) {
                     warning("Found key at pos: %llu", (unsigned long long)executable->pos());
+                    executable->seek(-64, SEEK_CUR);
+                    for(uint32 i = 0; i < sizeof(_key)/sizeof(_key[0]); i++) {
+                        _key[i] = executable->readByte();
+                        warning("0x%02x", _key[i]);
+                    }
                     return Common::kNoError;
                 }
             }

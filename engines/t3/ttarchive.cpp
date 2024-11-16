@@ -33,7 +33,7 @@
 
 #include "t3.h"
 #include "t3seekablereadstream.h"
-
+#include "utils/blowfish_ttarch.h"
 namespace T3 {
     TTArchiveEntry::TTArchiveEntry(const Common::Path &name, uint32 offset, uint32 len, TTArchive *parent) {
         _name = name;
@@ -202,7 +202,7 @@ namespace T3 {
         _header.chunkSize = 0;
         if (_header.version > 2) {
             _header.totalIndex = file->readUint32LE();
-            warning("Total number of files %u\n", _header.totalIndex);
+            warning("Total number of indices %u\n", _header.totalIndex);
             if (_header.totalIndex) {
                 _header.chunks.resize(_header.totalIndex);
 
@@ -220,12 +220,20 @@ namespace T3 {
                     _header.chunkSize = file->readUint32LE() * static_cast<size_t>(1024);
                     if (_header.version > 7) {
                         _header.reserved5 = file->readByte();
+                        if(_header.version>8) {
+                            if(_header.filesMode>1) {
+                                _header.reserved6 = file->readUint32LE();
+                            }
+                        }
                     }
-                    if (_header.version > 8) { _header.reserved6 = file->readUint32LE(); }
+//                    if (_header.version > 8) { _header.reserved6 = file->readUint32LE(); }
                 }
             }
         }
         _header.infoSize = file->readUint32LE();
+        if(!_header.infoSize) {
+            _header.infoSize = file->readUint32LE();
+        }
         _header.infoZippedSize = 0;
         if ((_header.filesMode >= TTArchiveHeader::FILESMODE_ZIPPED) && (_header.version > 6)) {
             _header.infoZippedSize = file->readUint32LE();
@@ -238,9 +246,13 @@ namespace T3 {
             for (uint32_t i = 0; i < _header.infoZippedSize; i++) {
                 zippedFileInformation[i] = file->readByte();
             }
+            warning("infoZippedSize %u infoSize: %u first two bytes: %02x %02x\n", _header.infoZippedSize, _header.infoSize, zippedFileInformation[0], zippedFileInformation[1]);
             if (!Common::inflateZlibHeaderless(_header.fileInformation.data(), _header.infoSize,
                                                zippedFileInformation.data(), _header.infoZippedSize)) {
-                warning("Inflate error");
+                if(!Common::inflateZlib(_header.fileInformation.data(), _header.infoSize,zippedFileInformation.data(), _header.infoZippedSize)) {
+                    error("Invalid compressed data file!");
+                    return false;
+                }
             }
         } else {
             for (uint32_t i = 0; i < _header.infoSize; i++) {
@@ -248,6 +260,7 @@ namespace T3 {
             }
         }
         if (_header.infoMode >= _header.INFOMODE_ENCRYPTED) {
+
             error("TODO: decrypt");
             return false;
         }

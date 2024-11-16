@@ -48,6 +48,8 @@ public:
 	void drawFrame(int testId);
 
 private:
+	uint8 _key[55];
+
 	OSystem *_system;
 	Renderer *_gfx;
 	Graphics::FrameLimiter *_frameLimiter;
